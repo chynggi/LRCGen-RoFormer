@@ -65,6 +65,14 @@ UVR_MODELS = {
         "description": "Demucs htdemucs_ft – best quality, slower",
         "vocals_stem": "vocals",
     },
+    # Not in audio-separator's built-in list → fetched from Hugging Face directly.
+    "mel_band_roformer_deux": {
+        "filename":    "becruily_deux.ckpt",
+        "config":      "config_deux_becruily.yaml",
+        "hf_repo":     "becruily/mel-band-roformer-deux",
+        "description": "Mel-Band RoFormer Deux (becruily) – top quality, slow on CPU",
+        "vocals_stem": "Vocals",
+    },
 }
 
 
@@ -775,6 +783,20 @@ def _split_to_syllables(segments: list) -> list:
 
 # ─── Vocal separation ──────────────────────────────────────────────────────────
 
+def _use_hf_roformer(sep, model_info: dict) -> None:
+    """
+    Let audio-separator load a RoFormer checkpoint that is not in its built-in
+    model list: download ckpt + yaml from Hugging Face into the model dir and
+    make download_model_files() return them as an MDXC (RoFormer) model.
+    """
+    base = f"https://huggingface.co/{model_info['hf_repo']}/resolve/main"
+    ckpt, cfg = model_info["filename"], model_info["config"]
+    model_path = os.path.join(sep.model_file_dir, ckpt)
+    sep.download_file_if_not_exists(f"{base}/{ckpt}", model_path)
+    sep.download_file_if_not_exists(f"{base}/{cfg}", os.path.join(sep.model_file_dir, cfg))
+    sep.download_model_files = lambda _fn: (ckpt, "MDXC", model_info["description"], model_path, cfg)
+
+
 def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> str:
     """
     Run audio-separator with the chosen UVR5 model.
@@ -787,7 +809,7 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
 
     _set(job_id, status="separating_model", progress=10,
          message=f"Loading vocal separation model '{uvr_model_id}'… "
-                 f"(first run: approx. 100–300 MB download)")
+                 f"(first run: approx. 100–450 MB download)")
 
     out_dir_path = Path("uploads").resolve()
     out_dir      = str(out_dir_path)
@@ -823,6 +845,8 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
             mdx_params={"hop_length": 1024, "segment_size": 256,
                          "overlap": 0.25, "batch_size": 1},
         )
+        if "hf_repo" in model_info:
+            _use_hf_roformer(sep, model_info)
         sep.load_model(model_filename=model_file)
 
         _set(job_id, status="separating", progress=25,

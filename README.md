@@ -25,7 +25,7 @@ Optionally paste your own lyrics into the text box — Whisper will align them t
 
 ![Vocal Isolation enabled](docs/2-Home-Whisper.png)
 
-Enable **Vocal Isolation** (UVR5) before transcription. This strips out all instrumentals and gives Whisper a clean vocals-only track — noticeably improves accuracy on music with heavy backgrounds. Choose from 4 models depending on speed vs quality preference.
+Enable **Vocal Isolation** (UVR5) before transcription. This strips out all instrumentals and gives Whisper a clean vocals-only track — noticeably improves accuracy on music with heavy backgrounds. Choose from 5 models depending on speed vs quality preference.
 
 ---
 
@@ -162,8 +162,9 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000
 | MDX-Net Voc_FT | Fast | Vocal-optimized tracks |
 | MDX-Net KARA 2 | Fast | Karaoke tracks, cleanest output |
 | Demucs htdemucs_ft | Slow | Best quality, complex mixes |
+| Mel-Band RoFormer Deux ([becruily](https://huggingface.co/becruily/mel-band-roformer-deux)) | Slow | Highest vocal SDR; ~435 MB download, CC BY-NC 4.0 |
 
-Models download automatically on first use (~100–300 MB each).
+Models download automatically on first use (~100–450 MB each).
 
 ---
 
