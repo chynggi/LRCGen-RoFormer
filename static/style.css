@@ -628,7 +628,10 @@ kbd {
 
 /* Main scroll in editor phase */
 body.editor-active .main { overflow: hidden; padding: 0; }
-body.editor-active #editorSection { padding: 14px 20px 14px; }
+/* #lrc-root must fill .main so #editorSection gets a bounded height and the
+   segment list scrolls internally instead of overflowing the clipped .main */
+body.editor-active #lrc-root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.editor-active #editorSection { padding: 14px 20px 14px; flex: 1; min-height: 0; }
 
 /* ── Action row gap ─────────────────────────────────────────── */
 .action-row { gap: 10px; }
