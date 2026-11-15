@@ -131,6 +131,9 @@ The application opens automatically in your browser at `http://127.0.0.1:8001`.
 | `UVR-MDX-NET-Voc_FT` | MDX-Net | Vocal-heavy acoustic tracks |
 | `UVR_MDXNET_KARA_2` | MDX-Net | Karaoke tracks with faint backing vocals |
 | `htdemucs_ft` | Demucs v4 | Complex orchestral and multi-layered arrangements |
+| `mel_band_roformer_deux` | Mel-Band RoFormer ([becruily](https://huggingface.co/becruily/mel-band-roformer-deux)) | Highest vocal SDR; ~435 MB download, CC BY-NC 4.0 |
+
+Models download automatically on first use (~100–450 MB each).
 
 ---
 
