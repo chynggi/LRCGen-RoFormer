@@ -740,8 +740,8 @@ async function openAlbumProjectFile(file, handle = null) {
                   // Preserve disk path & handle on restored data
                   if (handle) Studio.projectFileHandle = handle;
                   data.disk_path = detectedPath;
-                  const timeFormatted = autoStatus.saved_at ? new Date(autoStatus.saved_at).toLocaleTimeString() : 'vor kurzem';
-                  toast(`Neuerer Autosave-Stand (${timeFormatted}) wurde automatisch wiederhergestellt.`, 'info');
+                  const timeFormatted = autoStatus.saved_at ? new Date(autoStatus.saved_at).toLocaleTimeString() : I18n.t('autosave.time_recent');
+                  toast(I18n.t('autosave.restored', { time: timeFormatted }), 'info');
                 }
               }
             }

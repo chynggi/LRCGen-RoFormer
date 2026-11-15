@@ -58,14 +58,17 @@ echo [3/5] Checking hardware acceleration - NVIDIA GPU...
 nvidia-smi >nul 2>&1
 if errorlevel 1 goto :INSTALL_CPU
 
-echo [INFO] NVIDIA GPU detected! Installing PyTorch with CUDA 12.6 for RTX 20xx/30xx/40xx/50xx...
-"%PY_CMD%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 --no-warn-script-location
-"%PY_CMD%" -m pip install "audio-separator[gpu]>=0.24.0" --no-warn-script-location
+REM WhisperX 3.8.x pins torch~=2.8.0 / torchcodec<0.8 -> use the newest CUDA build of torch 2.8.0 (cu129)
+echo [INFO] NVIDIA GPU detected! Installing PyTorch 2.8.0 with CUDA 12.9 for RTX 20xx/30xx/40xx/50xx...
+"%PY_CMD%" -m pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129 --no-warn-script-location
+"%PY_CMD%" -m pip install "audio-separator>=0.24.0" --no-warn-script-location
+set "USE_GPU=1"
 goto :INSTALL_WHISPERX
 
 :INSTALL_CPU
 echo [INFO] No NVIDIA GPU detected or driver not in PATH. Installing Standard CPU PyTorch...
-"%PY_CMD%" -m pip install torch torchvision torchaudio --no-warn-script-location
+"%PY_CMD%" -m pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --no-warn-script-location
+"%PY_CMD%" -m pip install "audio-separator[cpu]>=0.24.0" --no-warn-script-location
 
 :INSTALL_WHISPERX
 REM 6. Install WhisperX into venv
@@ -78,6 +81,33 @@ echo.
 echo [5/5] Installing all packages - FastAPI, Whisper, Pyphen, etc....
 "%PY_CMD%" -m pip install -r "%~dp0requirements.txt" --no-warn-script-location
 if errorlevel 1 goto :PIP_ERROR
+
+REM onnxruntime-gpu 1.26.0 = last CUDA 12 build (1.27+ need CUDA 13). It shares its package dir with
+REM the CPU "onnxruntime" that faster-whisper pulls in, so it must be (re)installed last to win.
+if not "%USE_GPU%"=="1" goto :ORT_DONE
+echo [INFO] Installing ONNX Runtime GPU 1.26.0 (CUDA 12)...
+"%PY_CMD%" -m pip install --force-reinstall --no-deps "onnxruntime-gpu==1.26.0" --no-warn-script-location
+if errorlevel 1 goto :PIP_ERROR
+:ORT_DONE
+
+REM 8. Portable shared FFmpeg 7.1 (torchcodec 0.7 loads FFmpeg 4-7 DLLs only)
+echo.
+echo [+] Installing portable FFmpeg 7.1 (shared) into "%~dp0ffmpeg" ...
+if exist "%~dp0ffmpeg\bin\avcodec-61.dll" goto :FFMPEG_DONE
+set "FF_URL=https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-win64-gpl-shared-7.1.zip"
+set "FF_TMP=%TEMP%\lrcgen_ffmpeg"
+if exist "%FF_TMP%" rmdir /s /q "%FF_TMP%"
+mkdir "%FF_TMP%"
+curl.exe -L -o "%FF_TMP%\ffmpeg.zip" "%FF_URL%"
+if errorlevel 1 goto :FFMPEG_ERROR
+tar -xf "%FF_TMP%\ffmpeg.zip" -C "%FF_TMP%"
+if errorlevel 1 goto :FFMPEG_ERROR
+if exist "%~dp0ffmpeg" rmdir /s /q "%~dp0ffmpeg"
+for /d %%d in ("%FF_TMP%\ffmpeg-n7.1*") do move "%%d" "%~dp0ffmpeg" >nul
+rmdir /s /q "%FF_TMP%"
+if not exist "%~dp0ffmpeg\bin\avcodec-61.dll" goto :FFMPEG_ERROR
+:FFMPEG_DONE
+echo [INFO] FFmpeg ready: "%~dp0ffmpeg\bin"
 
 REM 8. Verify installation
 echo.
@@ -115,6 +145,15 @@ exit /b 1
 :VENV_ERROR
 echo.
 echo [ERROR] Could not create virtual environment (venv).
+echo.
+pause
+exit /b 1
+
+:FFMPEG_ERROR
+echo.
+echo [ERROR] Could not install portable FFmpeg 7.1.
+echo Download a "win64-gpl-shared-7.1" zip from https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases
+echo and extract it so that "%~dp0ffmpeg\bin\avcodec-61.dll" exists.
 echo.
 pause
 exit /b 1

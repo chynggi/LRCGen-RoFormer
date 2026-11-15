@@ -20,6 +20,9 @@ uploads/
 # Exported LRC files
 outputs/
 
+# Portable FFmpeg (shared build for torchcodec)
+ffmpeg/
+
 # audio-separator model cache
 models/
 audio_separator/models/

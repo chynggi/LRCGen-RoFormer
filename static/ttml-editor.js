@@ -1529,12 +1529,20 @@ function startDrag(e, type, lineId, sylIdx, handle, isAdlib = false) {
   pushHistory();
 
   if (type === 'line') {
-    const origLane = line.laneIndex !== undefined ? line.laneIndex : (line.agent === 'v2' ? 1 : 0);
+    const snap = l => ({
+      lineId: l.id, origStart: l.start, origEnd: l.end,
+      origLane: l.laneIndex !== undefined ? l.laneIndex : (l.agent === 'v2' ? 1 : 0),
+      origRawSylls: JSON.parse(JSON.stringify(l.rawSyllabi || [])),
+      origAdlibSylls: JSON.parse(JSON.stringify(l.adlibSyllabi || [])),
+    });
+    // Moving a line that is part of a multi-selection drags every selected line along.
+    const group = (handle === 'move' && Studio.selectedLineIds && Studio.selectedLineIds.size > 1 && Studio.selectedLineIds.has(lineId))
+      ? (lyrics.lines || []).filter(l => Studio.selectedLineIds.has(l.id)).map(snap)
+      : [snap(line)];
     Studio.drag = {
       type: 'line', lineId, handle, startX: e.clientX, startY: e.clientY,
-      origStart: line.start, origEnd: line.end, origLane: origLane,
-      origRawSylls: JSON.parse(JSON.stringify(line.rawSyllabi || [])),
-      origAdlibSylls: JSON.parse(JSON.stringify(line.adlibSyllabi || [])),
+      ...snap(line),
+      group,
     };
   } else {
     // Multi-Syllable Batch Drag
@@ -1712,8 +1720,9 @@ function handleDragMove(e) {
 
     if (dg.type === 'line') {
       // 1. Line blocks of other lines & other syllables
+      const draggedLineIds = new Set(dg.group.map(g => g.lineId));
       (lyrics.lines || []).forEach(l => {
-        if (l.id !== dg.lineId) {
+        if (!draggedLineIds.has(l.id)) {
           snapCandidates.push(l.start);
           snapCandidates.push(l.end);
           (l.rawSyllabi || []).forEach(s => {
@@ -1744,20 +1753,25 @@ function handleDragMove(e) {
       if (dg.handle === 'move') {
         let bestDist = snapThresholdSec;
         let snapDelta = 0;
+        // Snap the leading/trailing edge of the whole dragged group
+        const grpStart = Math.min(...dg.group.map(g => g.origStart));
+        const grpEnd   = Math.max(...dg.group.map(g => g.origEnd));
+        const rawGrpStart = grpStart + rawDeltaSec;
+        const rawGrpEnd   = grpEnd + rawDeltaSec;
 
         snapCandidates.forEach(cand => {
           // Snap start edge to candidate
-          const distStart = Math.abs(cand - rawStart);
+          const distStart = Math.abs(cand - rawGrpStart);
           if (distStart < bestDist) {
             bestDist = distStart;
-            snapDelta = cand - dg.origStart;
+            snapDelta = cand - grpStart;
             snappedSec = cand;
           }
           // Snap end edge to candidate
-          const distEnd = Math.abs(cand - rawEnd);
+          const distEnd = Math.abs(cand - rawGrpEnd);
           if (distEnd < bestDist) {
             bestDist = distEnd;
-            snapDelta = (cand - lineDur) - dg.origStart;
+            snapDelta = cand - grpEnd;
             snappedSec = cand;
           }
         });
@@ -1886,34 +1900,48 @@ function handleDragMove(e) {
     if (!line) return;
 
     if (dg.handle === 'move') {
-      const dur = dg.origEnd - dg.origStart;
-      const newStart = Math.max(0, dg.origStart + deltaSec);
-      line.start = Math.round(newStart * 1000) / 1000;
-      line.end   = Math.round((newStart + dur) * 1000) / 1000;
-      // Shift syllables
-      line.rawSyllabi = dg.origRawSylls.map(s => ({ ...s, time: Math.max(0, s.time + deltaMs) }));
-      line.adlibSyllabi = dg.origAdlibSylls.map(s => ({ ...s, time: Math.max(0, s.time + deltaMs) }));
+      // Keep relative spacing: clamp the shared delta so the earliest line stays >= 0
+      const grpStart = Math.min(...dg.group.map(g => g.origStart));
+      const moveSec = Math.max(-grpStart, deltaSec);
+      const moveMs  = Math.round(moveSec * 1000);
 
-      // Vertical lane movement for lines (4 Lanes: 0..3)
+      // Vertical lane movement for lines (4 Lanes: 0..3): dragged line follows the cursor,
+      // the rest of the group shifts by the same lane offset.
+      let laneShift = 0;
       const linesTrack = document.getElementById('tlLinesTrack');
       if (linesTrack) {
         const trackRect = linesTrack.getBoundingClientRect();
         const relY = e.clientY - trackRect.top;
         const targetLineLane = Math.max(0, Math.min(3, Math.floor(relY / 38)));
-        if (line.laneIndex !== targetLineLane) {
-          const oldLane = line.laneIndex !== undefined ? line.laneIndex : (line.agent === 'v2' ? 1 : 0);
-          line.laneIndex = targetLineLane;
-          if (targetLineLane >= 2) {
-            if (!line.adlib && line.text) line.adlib = line.text;
+        laneShift = targetLineLane - dg.origLane;
+      }
+
+      dg.group.forEach(g => {
+        const l = (lyrics.lines || []).find(li => li.id === g.lineId);
+        if (!l) return;
+        const newStart = g.origStart + moveSec;
+        l.start = Math.round(newStart * 1000) / 1000;
+        l.end   = Math.round((newStart + (g.origEnd - g.origStart)) * 1000) / 1000;
+        // Shift syllables
+        l.rawSyllabi = g.origRawSylls.map(s => ({ ...s, time: Math.max(0, s.time + moveMs) }));
+        l.adlibSyllabi = g.origAdlibSylls.map(s => ({ ...s, time: Math.max(0, s.time + moveMs) }));
+
+        const targetLane = Math.max(0, Math.min(3, g.origLane + laneShift));
+        if (targetLane !== g.origLane) {
+          l.laneIndex = targetLane;
+          if (targetLane >= 2) {
+            if (!l.adlib && l.text) l.adlib = l.text;
           }
           // Sync raw syllables that were aligned to the old lane
-          (line.rawSyllabi || []).forEach(s => {
-            if (s.lane === oldLane || s.lane === undefined) {
-              s.lane = targetLineLane;
+          (l.rawSyllabi || []).forEach(s => {
+            if (s.lane === g.origLane || s.lane === undefined) {
+              s.lane = targetLane;
             }
           });
+        } else if (l.laneIndex !== undefined) {
+          l.laneIndex = g.origLane;
         }
-      }
+      });
     } else if (dg.handle === 'left') {
       line.start = Math.round(Math.max(0, Math.min(dg.origEnd - 0.1, dg.origStart + deltaSec)) * 1000) / 1000;
     } else {

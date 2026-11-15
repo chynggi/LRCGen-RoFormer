@@ -24,6 +24,14 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Portable shared FFmpeg (./ffmpeg/bin) – torchcodec needs its DLLs (FFmpeg 4–7),
+# whisper/audio-separator call ffmpeg.exe. Must run before torch/whisperx imports.
+_FFMPEG_BIN = Path(__file__).resolve().parent / "ffmpeg" / "bin"
+if _FFMPEG_BIN.is_dir():
+    os.environ["PATH"] = str(_FFMPEG_BIN) + os.pathsep + os.environ.get("PATH", "")
+    if sys.platform == "win32":
+        os.add_dll_directory(str(_FFMPEG_BIN))
+
 # Configure live console logging to sys.stdout
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +50,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from i18n import t as _t
 from lyrics_parser import UniversalLyricsParser
 from ttml_engine import TTMLEngine
 from syllable_aligner import SyllableAligner
@@ -79,7 +88,7 @@ MIME_MAP = {
 UVR_MODELS = {
     "UVR-MDX-NET-Inst_HQ_3": {
         "filename":    "UVR-MDX-NET-Inst_HQ_3.onnx",
-        "description": "MDX-Net HQ3 – fast & very accurate (recommended)",
+        "description": "MDX-Net HQ3 – fast & very accurate",
         "vocals_stem": "Vocals",
     },
     "UVR-MDX-NET-Voc_FT": {
@@ -102,10 +111,12 @@ UVR_MODELS = {
         "filename":    "becruily_deux.ckpt",
         "config":      "config_deux_becruily.yaml",
         "hf_repo":     "becruily/mel-band-roformer-deux",
-        "description": "Mel-Band RoFormer Deux (becruily) – top quality, slow on CPU",
+        "description": "Mel-Band RoFormer Deux (becruily) – top quality, slow on CPU (default)",
         "vocals_stem": "Vocals",
     },
 }
+
+DEFAULT_UVR_MODEL = "mel_band_roformer_deux"
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -124,10 +135,12 @@ async def favicon():
 async def uvr_available():
     """Check whether audio-separator is importable."""
     try:
-        import audio_separator  # noqa: F401
+        # Import the separator itself, not just the package: a missing transitive
+        # dependency (e.g. audioread) only surfaces here.
+        from audio_separator.separator import Separator  # noqa: F401
         return {"available": True}
-    except ImportError:
-        return {"available": False}
+    except ImportError as e:
+        return {"available": False, "error": str(e)}
 
 
 @app.get("/api/uvr_models")
@@ -170,7 +183,7 @@ async def transcribe(
     language:         str  = Form(""),
     lyrics:           str  = Form(""),
     vocal_isolation:  str  = Form("false"),   # "true" | "false"
-    uvr_model_id:     str  = Form("UVR-MDX-NET-Inst_HQ_3"),
+    uvr_model_id:     str  = Form(DEFAULT_UVR_MODEL),
 ):
     allowed_whisper = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}
     if model_name not in allowed_whisper:
@@ -180,7 +193,7 @@ async def transcribe(
         return JSONResponse({"error": "Invalid file ID"}, status_code=400)
 
     if uvr_model_id not in UVR_MODELS:
-        uvr_model_id = "UVR-MDX-NET-Inst_HQ_3"
+        uvr_model_id = DEFAULT_UVR_MODEL
 
     audio_path = None
     for ext in ALLOWED_EXTS:
@@ -220,13 +233,13 @@ async def get_job(job_id: str):
 @app.post("/api/isolate")
 async def isolate_vocals(
     file_id:      str = Form(...),
-    uvr_model_id: str = Form("UVR-MDX-NET-Inst_HQ_3"),
+    uvr_model_id: str = Form(DEFAULT_UVR_MODEL),
 ):
     """Vocal isolation only — no Whisper. Returns a job_id to poll via /api/job/{job_id}."""
     if not re.fullmatch(r"[0-9a-f\-]{36}", file_id):
         return JSONResponse({"error": "Invalid file ID"}, status_code=400)
     if uvr_model_id not in UVR_MODELS:
-        uvr_model_id = "UVR-MDX-NET-Inst_HQ_3"
+        uvr_model_id = DEFAULT_UVR_MODEL
 
     audio_path = None
     for ext in ALLOWED_EXTS:
@@ -1024,7 +1037,7 @@ async def align_project_track(project_id: str, request: Request):
     mode = data.get("mode", "studio_ai") # "studio_ai" | "fast"
     use_whisper = (mode == "studio_ai") and data.get("use_whisper", True)
     whisper_model = data.get("whisper_model", "base")
-    uvr_model_id = data.get("uvr_model_id", "UVR-MDX-NET-Inst_HQ_3")
+    uvr_model_id = data.get("uvr_model_id", DEFAULT_UVR_MODEL)
 
     target_track = next((t for t in project["tracks"] if t["id"] == track_id), None)
     if not target_track:
@@ -1097,11 +1110,11 @@ async def align_project_track(project_id: str, request: Request):
     align_audio_path = audio_path
     cached_vocals = target_track.get("vocalsPath")
     if cached_vocals and Path(cached_vocals).exists():
-        print(f"[AI Studio Syllables] Verwende gecachtes Acapella: {cached_vocals}", flush=True)
+        print(f"[AI Studio Syllables] {_t('studio.cached_acapella', path=cached_vocals)}", flush=True)
         align_audio_path = cached_vocals
     else:
         try:
-            print(f"[AI Studio Syllables] Schritt 1/2: Isoliere Gesangsspur (UVR-MDX-Net) fuer Silben-Erkennung...", flush=True)
+            print(f"[AI Studio Syllables] {_t('studio.isolate_syllables')}", flush=True)
             job_id = str(uuid.uuid4())
             jobs[job_id] = {"status": "running", "progress": 10, "message": "Isolating vocals for syllables..."}
             vocals_path = _run_vocal_separation(job_id, audio_path, uvr_model_id)
@@ -1109,9 +1122,9 @@ async def align_project_track(project_id: str, request: Request):
                 target_track["vocalsPath"] = vocals_path
                 target_track["vocalsUrl"] = f"/api/audio/{Path(vocals_path).stem}"
                 align_audio_path = vocals_path
-                print(f"[AI Studio Syllables] Acapella erfolgreich isoliert -> {vocals_path}", flush=True)
+                print(f"[AI Studio Syllables] {_t('studio.acapella_ok', path=vocals_path)}", flush=True)
         except Exception as e:
-            print(f"[AI Studio Syllables] Acapella-Separation Fehler: {e}. Verwende Original-Audio.", flush=True)
+            print(f"[AI Studio Syllables] {_t('studio.acapella_failed', error=e)}", flush=True)
 
     if has_line_timestamps:
         print(f"[AI Studio] Step 2/2: Running Phoneme & Syllable Alignment on: {align_audio_path}...", flush=True)
@@ -1151,7 +1164,7 @@ async def align_project_track(project_id: str, request: Request):
         try:
             proj_file.write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception as pe:
-            print(f"[AI Studio] Warnung beim Speichern des Projekts: {pe}", flush=True)
+            print(f"[AI Studio] {_t('studio.project_save_warning', error=pe)}", flush=True)
 
     syllable_count = sum(len(l.get("rawSyllabi", [])) for l in aligned_lyrics.get("lines", []))
     print(f"[AI Studio] Alignment Complete! Generated {syllable_count} syllable timestamps.", flush=True)
@@ -1179,7 +1192,7 @@ async def align_project_track_lines(project_id: str, request: Request):
     track_id = data.get("track_id")
     language = data.get("language") or project.get("language") or "de"
     whisper_model = data.get("whisper_model", "base")
-    uvr_model_id = data.get("uvr_model_id", "UVR-MDX-NET-Inst_HQ_3")
+    uvr_model_id = data.get("uvr_model_id", DEFAULT_UVR_MODEL)
 
     target_track = next((t for t in project["tracks"] if t["id"] == track_id), None)
     if not target_track:
@@ -1226,11 +1239,11 @@ async def align_project_track_lines(project_id: str, request: Request):
     align_audio_path = audio_path
     cached_vocals = target_track.get("vocalsPath")
     if cached_vocals and Path(cached_vocals).exists():
-        print(f"[AI Studio Lines] Verwende gecachtes Acapella: {cached_vocals}", flush=True)
+        print(f"[AI Studio Lines] {_t('studio.cached_acapella', path=cached_vocals)}", flush=True)
         align_audio_path = cached_vocals
     else:
         try:
-            print(f"[AI Studio Lines] Schritt 1/2: Isoliere Gesangsspur (UVR-MDX-Net) fuer praezise Zeilen-Erkennung...", flush=True)
+            print(f"[AI Studio Lines] {_t('studio.isolate_lines')}", flush=True)
             job_id = str(uuid.uuid4())
             jobs[job_id] = {"status": "running", "progress": 10, "message": "Isolating vocals for lines..."}
             vocals_path = _run_vocal_separation(job_id, audio_path, uvr_model_id)
@@ -1238,9 +1251,9 @@ async def align_project_track_lines(project_id: str, request: Request):
                 target_track["vocalsPath"] = vocals_path
                 target_track["vocalsUrl"] = f"/api/audio/{Path(vocals_path).stem}"
                 align_audio_path = vocals_path
-                print(f"[AI Studio Lines] Acapella erfolgreich isoliert -> {vocals_path}", flush=True)
+                print(f"[AI Studio Lines] {_t('studio.acapella_ok', path=vocals_path)}", flush=True)
         except Exception as e:
-            print(f"[AI Studio Lines] Acapella-Separation Fehler: {e}. Verwende Original-Audio.", flush=True)
+            print(f"[AI Studio Lines] {_t('studio.acapella_failed', error=e)}", flush=True)
 
     # Run high-speed cached WhisperX + Wav2Vec2 CTC global monotonic alignment
     try:
@@ -1254,7 +1267,7 @@ async def align_project_track_lines(project_id: str, request: Request):
         print(f"[AI Studio Alignment Error] {e}", flush=True)
         import traceback
         traceback.print_exc()
-        return JSONResponse({"error": f"Alignment fehlgeschlagen: {e}"}, status_code=500)
+        return JSONResponse({"error": _t('studio.alignment_failed', error=e)}, status_code=500)
 
     line_only_canonical = []
     for l in aligned_result.get("lines", []):
@@ -1282,7 +1295,7 @@ async def align_project_track_lines(project_id: str, request: Request):
         try:
             proj_file.write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception as pe:
-            print(f"[AI Studio] Warnung beim Speichern des Projekts: {pe}", flush=True)
+            print(f"[AI Studio] {_t('studio.project_save_warning', error=pe)}", flush=True)
 
     print(f"[AI Studio] Successfully aligned {len(line_only_canonical)} lines!", flush=True)
     print(f"==================================================================\n", flush=True)
@@ -1359,7 +1372,7 @@ async def transcribe_enhanced(
     language:        str = Form(""),
     lyrics:          str = Form(""),
     vocal_isolation: str = Form("false"),
-    uvr_model_id:    str = Form("UVR-MDX-NET-Inst_HQ_3"),
+    uvr_model_id:    str = Form(DEFAULT_UVR_MODEL),
     mode:            str = Form("word"),   # "word" | "syllable"
     segment_hints:   str = Form(""),       # JSON: [{start,end,text}] from dropped LRC
 ):
@@ -1369,7 +1382,7 @@ async def transcribe_enhanced(
     if not re.fullmatch(r"[0-9a-f\-]{36}", file_id):
         return JSONResponse({"error": "Invalid file ID"}, status_code=400)
     if uvr_model_id not in UVR_MODELS:
-        uvr_model_id = "UVR-MDX-NET-Inst_HQ_3"
+        uvr_model_id = DEFAULT_UVR_MODEL
 
     audio_path = None
     for ext in ALLOWED_EXTS:
@@ -1967,7 +1980,7 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
     try:
         from audio_separator.separator import Separator  # type: ignore
 
-        print(f"\n[UVR5 / MDX-Net] Lade Modell: {model_file}...", flush=True)
+        print(f"\n[UVR5 / MDX-Net] {_t('uvr.loading_model', model=model_file)}", flush=True)
         sep = Separator(
             output_dir=out_dir,
             output_format="WAV",
@@ -1982,7 +1995,7 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
         _set(job_id, status="separating", progress=25,
              message=f"Isolating vocals with '{uvr_model_id}'...")
 
-        print(f"[UVR5 / MDX-Net] Starte Gesangsisolation auf: {abs_audio_path}...", flush=True)
+        print(f"[UVR5 / MDX-Net] {_t('uvr.starting', path=abs_audio_path)}", flush=True)
         output_files = sep.separate(abs_audio_path) or []
 
         # Resolve every returned path into something that actually exists on disk.
@@ -2007,7 +2020,7 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
         if vocals_path and vocals_path.exists():
             _set(job_id, progress=48,
                  message="Vocals isolated [OK]  Starting Whisper transcription...")
-            print(f"[UVR5 / MDX-Net] [OK] Gesangsisolation erfolgreich: {vocals_path}", flush=True)
+            print(f"[UVR5 / MDX-Net] [OK] {_t('uvr.success', path=vocals_path)}", flush=True)
             return str(vocals_path)
 
         # Secondary: any file with "vocal" in name (some models use "Vocal", "vocals", etc.)
@@ -2015,14 +2028,14 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
             if "vocal" in p.stem.lower():
                 _set(job_id, progress=48,
                      message=f"Vocals isolated [OK] (detected via '{p.stem}').")
-                print(f"[UVR5 / MDX-Net] [OK] Gesangsisolation erfolgreich: {p}", flush=True)
+                print(f"[UVR5 / MDX-Net] [OK] {_t('uvr.success', path=p)}", flush=True)
                 return str(p)
 
         # Tertiary: single file returned → probably the vocals stem (MDX models return 1 file)
         if len(resolved) == 1 and resolved[0].exists():
             _set(job_id, progress=48,
                  message=f"Separation complete [OK] (using '{resolved[0].stem}').")
-            print(f"[UVR5 / MDX-Net] [OK] Gesangsisolation erfolgreich: {resolved[0]}", flush=True)
+            print(f"[UVR5 / MDX-Net] [OK] {_t('uvr.success', path=resolved[0])}", flush=True)
             return str(resolved[0])
 
         # Last resort: first resolvable output
@@ -2030,22 +2043,22 @@ def _run_vocal_separation(job_id: str, audio_path: str, uvr_model_id: str) -> st
             _set(job_id, progress=48,
                  message="Separation complete (vocals stem not detected, "
                          "using first output).")
-            print(f"[UVR5 / MDX-Net] [OK] Gesangsisolation (Output 1): {resolved[0]}", flush=True)
+            print(f"[UVR5 / MDX-Net] [OK] {_t('uvr.success_output1', path=resolved[0])}", flush=True)
             return str(resolved[0])
 
         # Nothing usable — log what we got for debugging.
-        print(f"[UVR5 / MDX-Net WARNUNG] Keine Ausgabedateien gefunden. Separator: {output_files!r}", flush=True)
+        print(f"[UVR5 / MDX-Net WARNING] {_t('uvr.no_output', files=repr(output_files))}", flush=True)
         _set(job_id, message=f"⚠️  No output files found. "
                               f"Separator return: {output_files!r}. "
                               f"Continuing with original audio.")
 
-    except ImportError:
-        print("[UVR5 FEHLER] audio-separator ist nicht installiert.", flush=True)
+    except ImportError as exc:
+        print(f"[UVR5 ERROR] {_t('uvr.not_installed', error=exc)}", flush=True)
         _set(job_id, message="⚠️  audio-separator not installed – "
                               "skipping vocal isolation. "
                               "Run 'pip install audio-separator[cpu]'.")
     except Exception as exc:
-        print(f"[UVR5 FEHLER] Gesangsisolation fehlgeschlagen: {exc!r}", flush=True)
+        print(f"[UVR5 ERROR] {_t('uvr.failed', error=repr(exc))}", flush=True)
         _set(job_id, message=f"⚠️  Vocal isolation failed ({exc!r}) – "
                               f"continuing with original audio.")
 

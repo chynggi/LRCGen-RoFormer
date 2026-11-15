@@ -79,7 +79,7 @@ function renderSweepPlayer() {
   const lyrics = getActiveLyrics();
   const lines  = lyrics.lines || [];
   if (!lines.length) {
-    container.innerHTML = `<div class="karaoke-empty">Keine Lyrics für diesen Track vorhanden.</div>`;
+    container.innerHTML = `<div class="karaoke-empty">${I18n.t('player.no_lyrics')}</div>`;
     return;
   }
 

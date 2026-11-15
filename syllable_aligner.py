@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 from lyrics_parser import UniversalLyricsParser, _extract_adlib_from_text
+from i18n import t as _t
 
 # In-memory Model Caches for zero-reload fast inference
 _WHISPERX_MODEL_CACHE: Dict[Tuple[str, str, str, str], Any] = {}
@@ -530,10 +531,10 @@ class SyllableAligner:
 
         cache_key = (whisper_model, device, compute_type, language)
         if cache_key in _WHISPERX_MODEL_CACHE:
-            print(f"[WhisperX Ultra] Verwende gecachtes CTranslate2-Modell '{whisper_model}'...", flush=True)
+            print(f"[WhisperX Ultra] {_t('wx.cached_model', model=whisper_model)}", flush=True)
             model = _WHISPERX_MODEL_CACHE[cache_key]
         else:
-            print(f"\n[WhisperX Ultra] Initialisiere CTranslate2 ('{whisper_model}', Device: {device})...", flush=True)
+            print(f"\n[WhisperX Ultra] {_t('wx.init_model', model=whisper_model, device=device)}", flush=True)
             asr_opts = {"temperatures": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0], "compression_ratio_threshold": 2.4}
             vad_opts = {"chunk_size": 30, "vad_onset": 0.500, "vad_offset": 0.363}
             model = whisperx.load_model(whisper_model, device, compute_type=compute_type, language=language,
@@ -541,20 +542,20 @@ class SyllableAligner:
             _WHISPERX_MODEL_CACHE[cache_key] = model
 
         audio = whisperx.load_audio(audio_path)
-        print(f"[WhisperX Ultra] Transkribiere Acapella mit VAD...", flush=True)
+        print(f"[WhisperX Ultra] {_t('wx.transcribing_vad')}", flush=True)
         result = model.transcribe(audio, batch_size=4, chunk_size=30)
 
         align_cache_key = (language, device)
         if align_cache_key in _WHISPERX_ALIGN_CACHE:
-            print(f"[WhisperX Wav2Vec2] Verwende gecachtes CTC-Alignment-Modell fuer Sprache '{language}'...", flush=True)
+            print(f"[WhisperX Wav2Vec2] {_t('wx.cached_align_model', lang=language)}", flush=True)
             model_a, metadata = _WHISPERX_ALIGN_CACHE[align_cache_key]
         else:
-            print(f"[WhisperX Wav2Vec2] Lade phonetisches CTC-Alignment-Modell fuer Sprache '{language}'...", flush=True)
+            print(f"[WhisperX Wav2Vec2] {_t('wx.loading_align_model', lang=language)}", flush=True)
             try:
                 model_a, metadata = whisperx.load_align_model(language_code=language, device=device)
                 _WHISPERX_ALIGN_CACHE[align_cache_key] = (model_a, metadata)
             except Exception as e:
-                print(f"[WhisperX Wav2Vec2 Warnung] Konnte CTC Modell fuer '{language}' nicht laden: {e}", flush=True)
+                print(f"[WhisperX Wav2Vec2 WARNING] {_t('wx.align_model_failed', lang=language, error=e)}", flush=True)
                 model_a, metadata = None, None
 
         if model_a is not None:
@@ -562,7 +563,7 @@ class SyllableAligner:
                 aligned_res = whisperx.align(result.get("segments", []), model_a, metadata, audio, device, return_char_alignments=True)
                 segments = aligned_res.get("segments", [])
             except Exception as e:
-                print(f"[WhisperX CTC Hinweis] Fallback auf Wort-Segmente ({e})", flush=True)
+                print(f"[WhisperX CTC NOTE] {_t('wx.fallback_word_segments', error=e)}", flush=True)
                 segments = result.get("segments", [])
         else:
             segments = result.get("segments", [])
@@ -583,7 +584,7 @@ class SyllableAligner:
                     "score": float(w.get("score", 1.0)),
                 })
 
-        print(f"[WhisperX Ultra] [OK] {len(word_detections)} Woerter akustisch mit Wav2Vec2 ausgerichtet!", flush=True)
+        print(f"[WhisperX Ultra] [OK] {_t('wx.words_aligned', count=len(word_detections))}", flush=True)
         return word_detections
 
     @classmethod
@@ -643,12 +644,12 @@ class SyllableAligner:
                 print(f"[WhisperX Info] Fallback auf Standard Whisper ({ex_wx})", flush=True)
                 try:
                     import whisper
-                    print(f"[Whisper] Lade Modell '{whisper_model}'...", flush=True)
+                    print(f"[Whisper] {_t('whisper.loading_model', model=whisper_model)}", flush=True)
                     model = whisper.load_model(whisper_model)
                     opts: Dict[str, Any] = {"word_timestamps": True, "verbose": False, "compression_ratio_threshold": 2.4}
                     if lang_code:
                         opts["language"] = lang_code
-                    print(f"[Whisper] Transkribiere & extrahiere Wort-Timestamps aus: {audio_path}...", flush=True)
+                    print(f"[Whisper] {_t('whisper.transcribing', path=audio_path)}", flush=True)
                     res = model.transcribe(audio_path, **opts)
                     for seg in res.get("segments", []):
                         for w in seg.get("words", []):
@@ -659,11 +660,11 @@ class SyllableAligner:
                                     "start": round(w["start"], 3),
                                     "end": round(w["end"], 3),
                                 })
-                    print(f"[Whisper] Fertig! {len(word_detections)} Woerter akustisch erkannt.", flush=True)
+                    print(f"[Whisper] {_t('whisper.done', count=len(word_detections))}", flush=True)
                 except Exception as e:
-                    print(f"[Whisper Warnung] {e}", flush=True)
+                    print(f"[Whisper {_t('whisper.warning')}] {e}", flush=True)
 
-        print(f"[Pyphen & RMS] Generiere Silben fuer {len(lines)} Zeilen (Sprache: {lang_code})...", flush=True)
+        print(f"[Pyphen & RMS] {_t('pyphen.generating', count=len(lines), lang=lang_code)}", flush=True)
         updated_lines: List[Dict[str, Any]] = []
 
         for line_idx, line in enumerate(lines):
@@ -788,17 +789,17 @@ class SyllableAligner:
                     import whisper
                     cache_key = (whisper_model, "cpu")
                     if cache_key in _STANDARD_WHISPER_CACHE:
-                        print(f"[Whisper] Verwende gecachtes Modell '{whisper_model}'...", flush=True)
+                        print(f"[Whisper] {_t('whisper.cached_model', model=whisper_model)}", flush=True)
                         model = _STANDARD_WHISPER_CACHE[cache_key]
                     else:
-                        print(f"[Whisper] Lade Modell '{whisper_model}'...", flush=True)
+                        print(f"[Whisper] {_t('whisper.loading_model', model=whisper_model)}", flush=True)
                         model = whisper.load_model(whisper_model)
                         _STANDARD_WHISPER_CACHE[cache_key] = model
 
                     opts: Dict[str, Any] = {"word_timestamps": True, "verbose": False, "compression_ratio_threshold": 2.4}
                     if lang_code:
                         opts["language"] = lang_code
-                    print(f"[Whisper] Transkribiere & extrahiere Wort-Timestamps aus: {audio_path}...", flush=True)
+                    print(f"[Whisper] {_t('whisper.transcribing', path=audio_path)}", flush=True)
                     res = model.transcribe(audio_path, **opts)
                     for seg in res.get("segments", []):
                         for w in seg.get("words", []):

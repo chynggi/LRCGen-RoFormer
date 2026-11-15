@@ -78,13 +78,18 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux/macOS
 
-# 2. Install PyTorch with CUDA 12.6 (or CPU)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# 2. Install PyTorch 2.8.0 with CUDA 12.9 (WhisperX pins torch~=2.8.0; drop --index-url for CPU)
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 
 # 3. Install WhisperX and dependencies
 pip install whisperx
-pip install "audio-separator[gpu]>=0.24.0"
 pip install -r requirements.txt
+# NVIDIA GPU only: CUDA 12 ONNX Runtime, installed LAST (it shares a folder with the CPU build)
+pip install --force-reinstall --no-deps onnxruntime-gpu==1.26.0
+
+# 4. Portable FFmpeg 7.1 *shared* build (torchcodec loads FFmpeg 4-7 DLLs only):
+#    extract a "win64-gpl-shared-7.1" zip from https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases
+#    so that ffmpeg\bin\avcodec-61.dll exists in the project folder (install.bat does this automatically)
 ```
 
 ### 3. Launch Studio
@@ -127,11 +132,11 @@ The application opens automatically in your browser at `http://127.0.0.1:8001`.
 
 | Model ID | Architecture | Best For |
 |---|---|---|
-| `UVR-MDX-NET-Inst_HQ_3` | MDX-Net | General use, fast and clean separation (recommended) |
+| `UVR-MDX-NET-Inst_HQ_3` | MDX-Net | General use, fast and clean separation |
 | `UVR-MDX-NET-Voc_FT` | MDX-Net | Vocal-heavy acoustic tracks |
 | `UVR_MDXNET_KARA_2` | MDX-Net | Karaoke tracks with faint backing vocals |
 | `htdemucs_ft` | Demucs v4 | Complex orchestral and multi-layered arrangements |
-| `mel_band_roformer_deux` | Mel-Band RoFormer ([becruily](https://huggingface.co/becruily/mel-band-roformer-deux)) | Highest vocal SDR; ~435 MB download, CC BY-NC 4.0 |
+| `mel_band_roformer_deux` | Mel-Band RoFormer ([becruily](https://huggingface.co/becruily/mel-band-roformer-deux)) | **Default.** Highest vocal SDR; ~435 MB download, CC BY-NC 4.0 |
 
 Models download automatically on first use (~100–450 MB each).
 
