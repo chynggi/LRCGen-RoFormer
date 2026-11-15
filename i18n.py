@@ -124,6 +124,22 @@ MESSAGES = {
         "ko": "Wav2Vec2로 단어 {count}개를 음향 정렬했습니다!",
         "de": "{count} Woerter akustisch mit Wav2Vec2 ausgerichtet!",
     },
+    # ── MMS forced alignment (mms_aligner.py) ────────────────────────────────
+    "mms.loading_model": {
+        "en": "Loading MMS forced-alignment model '{model}' (device: {device})...",
+        "ko": "MMS 강제 정렬 모델 '{model}' 로딩 중 (장치: {device})...",
+        "de": "Lade MMS-Forced-Alignment-Modell '{model}' (Device: {device})...",
+    },
+    "mms.aligned": {
+        "en": "{words} lyric words force-aligned across {lines} lines!",
+        "ko": "가사 단어 {words}개를 {lines}줄에 걸쳐 강제 정렬했습니다!",
+        "de": "{words} Liedtext-Woerter ueber {lines} Zeilen zwangsausgerichtet!",
+    },
+    "mms.failed": {
+        "en": "MMS alignment failed, falling back to WhisperX matching: {error}",
+        "ko": "MMS 정렬 실패, WhisperX 매칭으로 대체합니다: {error}",
+        "de": "MMS-Alignment fehlgeschlagen, Fallback auf WhisperX-Matching: {error}",
+    },
     "whisper.loading_model": {
         "en": "Loading model '{model}'...",
         "ko": "모델 '{model}' 로딩 중...",

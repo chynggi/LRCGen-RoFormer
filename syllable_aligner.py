@@ -778,9 +778,28 @@ class SyllableAligner:
                 "lines": [],
             }
 
-        # 1. Acoustic word recognition with WhisperX (or Whisper fallback)
-        word_detections: List[Dict[str, Any]] = []
+        num_lines = len(cleaned_raw_lines)
+
+        # Extract clean main text & ad-libs for all lines
+        parsed_lines_info = []
+        for raw_line in cleaned_raw_lines:
+            main_t, adlib_t = _extract_adlib_from_text(raw_line)
+            if not main_t and adlib_t:
+                main_t = adlib_t
+                adlib_t = None
+            parsed_lines_info.append({"raw": raw_line, "main": main_t or raw_line, "adlib": adlib_t})
+
+        # 1a. Preferred: force-align the known lyrics directly (MMS CTC, no ASR / fuzzy matching)
+        mms_words: Optional[List[List[Dict[str, Any]]]] = None
         if Path(audio_path).exists():
+            from mms_aligner import align_lyric_lines
+            mms_words = align_lyric_lines(audio_path, [p["main"] for p in parsed_lines_info], lang_code)
+
+        # 1b. Fallback: acoustic word recognition with WhisperX (or Whisper)
+        word_detections: List[Dict[str, Any]] = []
+        if mms_words is not None:
+            word_detections = [w for line_words in mms_words for w in line_words]
+        elif Path(audio_path).exists():
             try:
                 word_detections = cls._run_whisperx_pipeline(audio_path, language=lang_code, whisper_model=whisper_model)
             except Exception as ex_wx:
@@ -813,17 +832,6 @@ class SyllableAligner:
                 except Exception as ex:
                     print(f"[Whisper Error] {ex}", flush=True)
 
-        num_lines = len(cleaned_raw_lines)
-
-        # 2. Extract clean main text & ad-libs for all lines
-        parsed_lines_info = []
-        for raw_line in cleaned_raw_lines:
-            main_t, adlib_t = _extract_adlib_from_text(raw_line)
-            if not main_t and adlib_t:
-                main_t = adlib_t
-                adlib_t = None
-            parsed_lines_info.append({"raw": raw_line, "main": main_t or raw_line, "adlib": adlib_t})
-
         # 3. Global monotonic + fuzzy matching against acoustic words
         def _norm_token(s: str) -> str:
             return re.sub(r"[^\w]", "", s).lower()
@@ -850,7 +858,13 @@ class SyllableAligner:
         line_a_bounds: List[Optional[Tuple[int, int]]] = [None] * num_lines
         line_matched_pairs: List[List[Tuple[int, int]]] = [[] for _ in range(num_lines)]
 
-        if flat_user_tokens and ac_tokens:
+        if mms_words is not None:
+            # Lines without any pronounceable word stay None and are interpolated in step 4
+            for l_idx, line_words in enumerate(mms_words):
+                if line_words:
+                    line_anchors[l_idx] = (line_words[0]["start"], line_words[-1]["end"])
+
+        if mms_words is None and flat_user_tokens and ac_tokens:
             # Pass 3A: Global exact anchor blocks (with autojunk=False so chorus words are never skipped)
             matcher = difflib.SequenceMatcher(None, flat_user_tokens, ac_tokens, autojunk=False)
             blocks = [b for b in matcher.get_matching_blocks() if b[2] > 0]
@@ -1127,7 +1141,7 @@ class SyllableAligner:
 
         return {
             "meta": {
-                "source": "whisperx_global_align",
+                "source": "mms_forced_align" if mms_words is not None else "whisperx_global_align",
                 "schemaVersion": 2,
                 "timingType": "Word",
             },
