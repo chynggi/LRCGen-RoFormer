@@ -635,8 +635,22 @@ class SyllableAligner:
                     "lines": aligned_from_raw.get("lines", []),
                 }
 
-        word_detections = []
+        # MMS forced alignment of every main line inside its own line window
+        mms_syls: Optional[List[Optional[List[Dict[str, Any]]]]] = None
         if use_whisper and Path(audio_path).exists():
+            from mms_aligner import align_line_syllables
+            mms_syls = align_line_syllables(
+                audio_path,
+                [(float(l.get("start", 0.0)), float(l.get("end", float(l.get("start", 0.0)) + 3.0)),
+                  (l.get("text") or "").strip()) for l in lines],
+                lang_code,
+            )
+        # WhisperX is only needed for lines MMS could not time, and for ad-libs
+        need_whisper = mms_syls is None or any(
+            ((l.get("text") or "").strip() and not s) or l.get("adlib") for l, s in zip(lines, mms_syls))
+
+        word_detections = []
+        if use_whisper and need_whisper and Path(audio_path).exists():
             try:
                 # 1. High-precision WhisperX + Wav2Vec2 CTC Pipeline
                 word_detections = cls._run_whisperx_pipeline(audio_path, language=lang_code, whisper_model=whisper_model)
@@ -674,7 +688,9 @@ class SyllableAligner:
             adlib_text = line.get("adlib", "")
 
             main_syls = []
-            if main_text:
+            if main_text and mms_syls and mms_syls[line_idx]:
+                main_syls = mms_syls[line_idx]
+            elif main_text:
                 candidates = [
                     w for w in word_detections
                     if w["start"] >= l_start - 1.2 and w["end"] <= l_end + 1.2
@@ -1063,6 +1079,15 @@ class SyllableAligner:
         dic = get_pyphen_dic(lang_code)
         canonical_lines: List[Dict[str, Any]] = []
 
+        mms_syls = None
+        if mms_words is not None:
+            from mms_aligner import align_line_syllables
+            mms_syls = align_line_syllables(
+                audio_path,
+                [(line_anchors[i][0], line_anchors[i][1], parsed_lines_info[i]["main"]) for i in range(num_lines)],
+                lang_code,
+            )
+
         for l_idx in range(num_lines):
             l_start, l_end = line_anchors[l_idx]
             info = parsed_lines_info[l_idx]
@@ -1071,7 +1096,9 @@ class SyllableAligner:
 
             candidates = [w for w in word_detections if w["start"] >= l_start - 1.2 and w["end"] <= l_end + 1.2]
             main_syls = []
-            if main_text:
+            if main_text and mms_syls and mms_syls[l_idx]:
+                main_syls = mms_syls[l_idx]
+            elif main_text:
                 main_syls = syllabify_line(
                     line_start_s=l_start,
                     line_end_s=l_end,

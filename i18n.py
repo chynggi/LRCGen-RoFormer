@@ -135,6 +135,11 @@ MESSAGES = {
         "ko": "가사 단어 {words}개를 {lines}줄에 걸쳐 강제 정렬했습니다!",
         "de": "{words} Liedtext-Woerter ueber {lines} Zeilen zwangsausgerichtet!",
     },
+    "mms.syllables_aligned": {
+        "en": "Syllables force-aligned for {lines}/{total} lines!",
+        "ko": "{total}줄 중 {lines}줄의 음절을 강제 정렬했습니다!",
+        "de": "Silben für {lines}/{total} Zeilen zwangsausgerichtet!",
+    },
     "mms.failed": {
         "en": "MMS alignment failed, falling back to WhisperX matching: {error}",
         "ko": "MMS 정렬 실패, WhisperX 매칭으로 대체합니다: {error}",
